@@ -296,16 +296,16 @@ function LiveSection() {
             The room is live
           </p>
           <h2 className="mt-4 text-4xl leading-[1.17] font-black tracking-[-0.035em] text-balance sm:text-5xl">
-            ทุกจังหวะของห้องเรียน สดและมองเห็นได้
+            ทุกปัญหารับรู้ได้แบบ real-time
           </h2>
           <p className="mt-6 text-base leading-8 text-muted sm:text-lg">
             Aha!
-            เปลี่ยนเสียงเงียบในห้องให้เป็นฟีดสัญญาณที่ผู้สอนอ่านได้ทันที—ใครเริ่มเข้าใจ
+            เปลี่ยนความเงียบในห้องให้เป็นสัญญาณที่ครูผู้สอนอ่านได้ทันทีว่าใครเริ่มเข้าใจ
             ตรงไหนยังสับสน และเมื่อไรควรหยุดถามเพิ่ม
           </p>
           <div className="mt-8 flex items-center gap-3 border-l-4 border-[#F25A4B] pl-4">
             <span className="text-sm font-bold">
-              ไม่ต้องเดาอารมณ์ของห้องอีกต่อไป
+              ไม่ต้องเดาอารมณ์ในห้องอีกต่อไป
             </span>
           </div>
         </div>
@@ -332,7 +332,7 @@ function FinalCTA() {
             Ready for an Aha! moment?
           </p>
           <h2 className="mt-4 text-3xl leading-tight font-black tracking-[-0.03em] sm:text-4xl">
-            พร้อมอ่านห้องเรียนแบบเรียลไทม์หรือยัง?
+            พร้อมเข้าใจนักเรียนแบบเรียลไทม์หรือยัง?
           </h2>
           <p className="mt-4 text-base leading-7 text-[#D8D0CD]">
             ทดลองดูว่า Aha! จะช่วยให้ทุกคนในห้องมีส่วนร่วมได้อย่างไร
