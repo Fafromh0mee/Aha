@@ -3,7 +3,7 @@ import type { DemoState, QuizId, QuizOptionId, ReactionKey } from "./demo-state"
 export type ClientRole = "teacher" | "student" | "display";
 
 export type ClientAction =
-  | { type: "launch_interaction" }
+  | { type: "start_class" }
   | { type: "launch_quiz"; quizId: QuizId }
   | { type: "reveal_results" }
   | { type: "show_question"; questionId: string }
@@ -21,7 +21,7 @@ export type ServerMessage =
   | { type: "error"; message: string };
 
 const teacherActions = new Set([
-  "launch_interaction",
+  "start_class",
   "launch_quiz",
   "reveal_results",
   "show_question",
@@ -63,7 +63,7 @@ export function parseClientAction(value: unknown): ClientAction | null {
   if (!value || typeof value !== "object" || !("type" in value)) return null;
   const message = value as Record<string, unknown>;
   switch (message.type) {
-    case "launch_interaction":
+    case "start_class":
     case "reveal_results":
     case "launch_aha":
     case "end_class":

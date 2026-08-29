@@ -3,9 +3,11 @@ import {
   createLiveDemoState,
   getQuiz,
   type DemoState,
+  type ActivityHistoryEvent,
   type QuizId,
   type QuizOptionId,
   type ReactionKey,
+  type PulseHistoryEvent,
   type TimelineEvent,
 } from "../lib/demo-state";
 import {
@@ -33,6 +35,9 @@ type StoredRoom = {
   quizAnswers: Record<QuizId, Record<string, QuizOptionId>>;
   ahaResponses: Record<string, AhaResponse>;
   resetStudentIds: string[];
+  participantIds: string[];
+  quizLaunchedAt: Record<QuizId, number | null>;
+  quizFirstAnswersAt: Record<QuizId, Record<string, number>>;
 };
 
 const MAX_MESSAGE_BYTES = 4096;
@@ -44,6 +49,9 @@ function createStoredRoom(): StoredRoom {
     quizAnswers: { "quiz-1": {}, "quiz-2": {} },
     ahaResponses: {},
     resetStudentIds: [],
+    participantIds: [],
+    quizLaunchedAt: { "quiz-1": null, "quiz-2": null },
+    quizFirstAnswersAt: { "quiz-1": {}, "quiz-2": {} },
   };
 }
 
@@ -51,6 +59,7 @@ function addTimelineEvent(
   state: DemoState,
   label: string,
   detail: string,
+  timestamp: number,
   eventKey?: string,
 ) {
   if (eventKey && state.timeline.some((event) => event.eventKey === eventKey)) {
@@ -60,9 +69,24 @@ function addTimelineEvent(
     id: crypto.randomUUID(),
     label,
     detail,
+    timestamp,
     eventKey,
   };
   return [event, ...state.timeline].slice(0, 8);
+}
+
+function addActivityEvent(
+  state: DemoState,
+  type: ActivityHistoryEvent["type"],
+  label: string,
+  timestamp: number,
+  quizId?: QuizId,
+) {
+  return [{ id: crypto.randomUUID(), type, label, timestamp, quizId }, ...state.activityHistory].slice(0, 200);
+}
+
+function addPulseEvent(state: DemoState, reaction: ReactionKey, timestamp: number): PulseHistoryEvent[] {
+  return [{ id: crypto.randomUUID(), reaction, timestamp }, ...state.pulseHistory].slice(0, 500);
 }
 
 function countReactions(values: Record<string, ReactionKey>) {
@@ -86,6 +110,68 @@ function isSocketAttachment(value: unknown): value is SocketAttachment {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<SocketAttachment>;
   return isClientRole(candidate.role ?? null) && typeof candidate.clientId === "string";
+}
+
+function normalizeRoom(value: unknown): StoredRoom {
+  const fallback = createStoredRoom();
+  if (!value || typeof value !== "object") return fallback;
+  const candidate = value as Partial<StoredRoom>;
+  if (!candidate.state || typeof candidate.state !== "object") return fallback;
+
+  const previous = candidate.state as Partial<DemoState>;
+  const previousSession: Partial<DemoState["session"]> = previous.session ?? {};
+  const migratedAt = typeof previous.updatedAt === "number" && previous.updatedAt > 0
+    ? previous.updatedAt
+    : Date.now();
+  const status = previousSession.status === "ended"
+    ? "ended"
+    : previousSession.status === "live"
+      ? "live"
+      : "waiting";
+  const startedAt = typeof previousSession.startedAt === "number"
+    ? previousSession.startedAt
+    : status === "waiting" ? null : migratedAt;
+  const endedAt = typeof previousSession.endedAt === "number"
+    ? previousSession.endedAt
+    : status === "ended" ? migratedAt : null;
+  const timeline = Array.isArray(previous.timeline)
+    ? previous.timeline.map((event) => ({ ...event, timestamp: typeof event.timestamp === "number" ? event.timestamp : migratedAt }))
+    : [];
+  const state: DemoState = {
+    ...fallback.state,
+    ...previous,
+    version: fallback.state.version,
+    session: {
+      ...fallback.state.session,
+      ...previousSession,
+      status,
+      startedAt,
+      endedAt,
+      durationMs: typeof previousSession.durationMs === "number"
+        ? previousSession.durationMs
+        : endedAt && startedAt ? Math.max(0, endedAt - startedAt) : null,
+      participantCount: typeof previousSession.participantCount === "number"
+        ? previousSession.participantCount
+        : typeof previousSession.connectedStudents === "number" ? previousSession.connectedStudents : 0,
+    },
+    timeline,
+    pulseHistory: Array.isArray(previous.pulseHistory) ? previous.pulseHistory : [],
+    activityHistory: Array.isArray(previous.activityHistory) ? previous.activityHistory : [],
+    metrics: previous.metrics && typeof previous.metrics.interactionCount === "number"
+      ? previous.metrics
+      : fallback.state.metrics,
+  };
+
+  return {
+    state,
+    studentReactions: candidate.studentReactions ?? {},
+    quizAnswers: candidate.quizAnswers ?? fallback.quizAnswers,
+    ahaResponses: candidate.ahaResponses ?? {},
+    resetStudentIds: candidate.resetStudentIds ?? [],
+    participantIds: candidate.participantIds ?? [],
+    quizLaunchedAt: candidate.quizLaunchedAt ?? fallback.quizLaunchedAt,
+    quizFirstAnswersAt: candidate.quizFirstAnswersAt ?? fallback.quizFirstAnswersAt,
+  };
 }
 
 export class ClassroomRoom extends DurableObject<CloudflareEnv> {
@@ -149,6 +235,20 @@ export class ClassroomRoom extends DurableObject<CloudflareEnv> {
       };
       this.writeRoom(room);
     }
+    if (role === "student" && !room.participantIds.includes(clientId)) {
+      room = this.withState(
+        { ...room, participantIds: [...room.participantIds, clientId] },
+        {
+          ...room.state,
+          session: {
+            ...room.state.session,
+            participantCount: room.state.session.participantCount + 1,
+          },
+        },
+        Date.now(),
+      );
+      this.writeRoom(room);
+    }
     const welcome: ServerMessage = {
       type: "welcome",
       clientId,
@@ -207,7 +307,12 @@ export class ClassroomRoom extends DurableObject<CloudflareEnv> {
       .exec<{ json: string }>("SELECT json FROM room_state WHERE id = 1")
       .one();
     try {
-      return JSON.parse(row.json) as StoredRoom;
+      const parsed: unknown = JSON.parse(row.json);
+      const normalized = normalizeRoom(parsed);
+      if (normalized.state.version !== (parsed as { state?: { version?: number } }).state?.version) {
+        this.writeRoom(normalized);
+      }
+      return normalized;
     } catch {
       const clean = createStoredRoom();
       this.writeRoom(clean);
@@ -241,44 +346,55 @@ export class ClassroomRoom extends DurableObject<CloudflareEnv> {
 
     if (room.state.session.status === "ended") return room;
     const state = room.state;
+    const timestamp = Date.now();
 
     switch (action.type) {
-      case "launch_interaction":
+      case "start_class":
+        if (state.session.status !== "waiting") return room;
         return this.withState(room, {
           ...state,
           activeQuizId: null,
-          activityMode: "interaction",
+          activityMode: "idle",
           displayMode: "interaction",
-          timeline: addTimelineEvent(state, "เปิด Class Pulse", "นักเรียนส่ง Reaction ได้แล้ว"),
-        });
+          session: { ...state.session, status: "live", startedAt: timestamp, endedAt: null, durationMs: null },
+          timeline: addTimelineEvent(state, "เริ่มคลาส", "เปิด Class Pulse ตลอดทั้ง session", timestamp, "class-started"),
+          activityHistory: addActivityEvent(state, "class_started", "เริ่มคลาส", timestamp),
+        }, timestamp);
       case "launch_quiz": {
+        if (state.session.status !== "live") return room;
         const quiz = getQuiz(state, action.quizId);
-        return this.withState(room, {
+        return this.withState({
+          ...room,
+          quizLaunchedAt: { ...room.quizLaunchedAt, [action.quizId]: timestamp },
+        }, {
           ...state,
           activeQuizId: action.quizId,
           activityMode: "quiz",
           displayMode: "quiz",
-          timeline: addTimelineEvent(state, `เปิด ${quiz?.label ?? "Quick Quiz"}`, quiz?.question ?? ""),
-        });
+          timeline: addTimelineEvent(state, `เปิด ${quiz?.label ?? "Quick Quiz"}`, quiz?.question ?? "", timestamp),
+          activityHistory: addActivityEvent(state, "quiz_launched", quiz?.label ?? "Quick Quiz", timestamp, action.quizId),
+        }, timestamp);
       }
       case "reveal_results":
-        if (!state.activeQuizId || state.activityMode !== "quiz") return room;
+        if (state.session.status !== "live" || !state.activeQuizId || state.activityMode !== "quiz") return room;
         return this.withState(room, {
           ...state,
           activityMode: "results",
           displayMode: "results",
-          timeline: addTimelineEvent(state, "เปิดผล Quiz บนจอ", "ทุกคนเห็นคำตอบที่ถูกแล้ว"),
-        });
+          timeline: addTimelineEvent(state, "เปิดผล Quiz บนจอ", "ทุกคนเห็นคำตอบที่ถูกแล้ว", timestamp),
+          activityHistory: addActivityEvent(state, "quiz_revealed", "เปิดผล Quiz", timestamp, state.activeQuizId),
+        }, timestamp);
       case "show_question":
+        if (state.session.status !== "live") return room;
         if (!state.questions.some((question) => question.id === action.questionId)) return room;
         return this.withState(room, {
           ...state,
           selectedQuestionId: action.questionId,
           displayMode: "question",
-          timeline: addTimelineEvent(state, "ส่งคำถามขึ้น Classroom Display", "พร้อมคุยกับทั้งห้อง"),
-        });
+          timeline: addTimelineEvent(state, "ส่งคำถามขึ้น Classroom Display", "พร้อมคุยกับทั้งห้อง", timestamp),
+        }, timestamp);
       case "launch_aha":
-        if (state.ahaMoment.launched) return room;
+        if (state.session.status !== "live" || state.ahaMoment.launched) return room;
         return this.withState(room, {
           ...state,
           activityMode: "aha",
@@ -288,64 +404,104 @@ export class ClassroomRoom extends DurableObject<CloudflareEnv> {
             state,
             "ส่ง Aha! Moment ขึ้นจอ",
             "เปิดรับ feedback สุดท้ายจากห้อง",
+            timestamp,
             "aha-moment-launched",
           ),
-        });
+          activityHistory: addActivityEvent(state, "aha_launched", "Aha! Moment", timestamp),
+        }, timestamp);
       case "end_class":
+        if (state.session.status !== "live") return room;
         return this.withState(room, {
           ...state,
-          session: { ...state.session, status: "ended" },
+          session: {
+            ...state.session,
+            status: "ended",
+            endedAt: timestamp,
+            durationMs: Math.max(0, timestamp - (state.session.startedAt ?? timestamp)),
+          },
           activityMode: "ended",
           displayMode: "ending",
           timeline: addTimelineEvent(
             state,
             "จบคลาสแล้ว",
             "บันทึกสรุปสัญญาณของห้องเรียบร้อย",
+            timestamp,
             "class-ended",
           ),
-        });
+          activityHistory: addActivityEvent(state, "class_ended", "จบคลาส", timestamp),
+        }, timestamp);
       case "reaction":
-        if (state.activityMode !== "interaction") return room;
+        if (state.session.status !== "live") return room;
         if (room.studentReactions[client.clientId] === action.reaction) return room;
         return this.withState(
           { ...room, studentReactions: { ...room.studentReactions, [client.clientId]: action.reaction } },
           {
             ...state,
             reactions: countReactions({ ...room.studentReactions, [client.clientId]: action.reaction }),
-            timeline: addTimelineEvent(state, "Class Pulse อัปเดต", "ได้รับ Reaction จากนักเรียน"),
+            pulseHistory: addPulseEvent(state, action.reaction, timestamp),
+            metrics: { ...state.metrics, interactionCount: state.metrics.interactionCount + 1 },
+            timeline: addTimelineEvent(state, "Class Pulse อัปเดต", "ได้รับ Reaction จากนักเรียน", timestamp),
+            activityHistory: addActivityEvent(state, "pulse_changed", "Class Pulse อัปเดต", timestamp),
           },
+          timestamp,
         );
       case "answer_quiz": {
-        if (state.activityMode !== "quiz" || state.activeQuizId !== action.quizId) return room;
+        if (state.session.status !== "live" || state.activityMode !== "quiz" || state.activeQuizId !== action.quizId) return room;
         const answers = room.quizAnswers[action.quizId];
         if (answers[client.clientId] === action.answer) return room;
         const nextAnswers = { ...answers, [client.clientId]: action.answer };
         const quizAnswers = { ...room.quizAnswers, [action.quizId]: nextAnswers };
+        const firstAnswers = room.quizFirstAnswersAt[action.quizId];
+        const firstAnsweredAt = firstAnswers[client.clientId] ?? timestamp;
+        const quizFirstAnswersAt = {
+          ...room.quizFirstAnswersAt,
+          [action.quizId]: { ...firstAnswers, [client.clientId]: firstAnsweredAt },
+        };
+        const responseTimes = Object.entries(quizFirstAnswersAt).flatMap(([quizId, answersForQuiz]) => {
+          const launchedAt = room.quizLaunchedAt[quizId as QuizId];
+          return launchedAt ? Object.values(answersForQuiz).map((answeredAt) => Math.max(0, answeredAt - launchedAt)) : [];
+        });
+        const averageQuizResponseTimeMs = responseTimes.length
+          ? Math.round(responseTimes.reduce((total, value) => total + value, 0) / responseTimes.length)
+          : null;
+        const quizResponseCount = Object.values(quizFirstAnswersAt)
+          .reduce((total, answersForQuiz) => total + Object.keys(answersForQuiz).length, 0);
         const quizzes = state.quizzes.map((quiz) =>
           quiz.id === action.quizId
             ? { ...quiz, responses: countQuizAnswers(nextAnswers) }
             : quiz,
         );
         return this.withState(
-          { ...room, quizAnswers },
+          { ...room, quizAnswers, quizFirstAnswersAt },
           {
             ...state,
             quizzes,
-            timeline: addTimelineEvent(state, "มีคำตอบ Quiz ใหม่", `${Object.keys(nextAnswers).length} คนตอบแล้ว`),
+            metrics: {
+              ...state.metrics,
+              interactionCount: state.metrics.interactionCount + 1,
+              quizResponseCount,
+              averageQuizResponseTimeMs,
+            },
+            timeline: addTimelineEvent(state, "มีคำตอบ Quiz ใหม่", `${Object.keys(nextAnswers).length} คนตอบแล้ว`, timestamp),
+            activityHistory: addActivityEvent(state, "quiz_answered", `มีคำตอบ ${action.quizId}`, timestamp, action.quizId),
           },
+          timestamp,
         );
       }
       case "submit_question":
+        if (state.session.status !== "live") return room;
         return this.withState(room, {
           ...state,
           questions: [
             { id: crypto.randomUUID(), text: action.text, votes: 1, isNew: true },
             ...state.questions,
           ],
-          timeline: addTimelineEvent(state, "มีคำถามใหม่", action.text),
-        });
+          metrics: { ...state.metrics, interactionCount: state.metrics.interactionCount + 1 },
+          timeline: addTimelineEvent(state, "มีคำถามใหม่", action.text, timestamp),
+          activityHistory: addActivityEvent(state, "question_submitted", "มีคำถามใหม่", timestamp),
+        }, timestamp);
       case "aha_feedback": {
-        if (state.activityMode !== "aha") return room;
+        if (state.session.status !== "live" || state.activityMode !== "aha") return room;
         const previous = room.ahaResponses[client.clientId];
         if (previous?.reaction === action.reaction && previous.feedback === (action.feedback ?? "")) {
           return room;
@@ -373,20 +529,23 @@ export class ClassroomRoom extends DurableObject<CloudflareEnv> {
               feedbackCount: feedbackMessages.length,
               feedbackMessages,
             },
-            timeline: addTimelineEvent(state, "Aha! Moment อัปเดต", `${Object.keys(ahaResponses).length} คนตอบแล้ว`),
+            metrics: { ...state.metrics, interactionCount: state.metrics.interactionCount + 1 },
+            timeline: addTimelineEvent(state, "Aha! Moment อัปเดต", `${Object.keys(ahaResponses).length} คนตอบแล้ว`, timestamp),
+            activityHistory: addActivityEvent(state, "aha_responded", "ได้รับ Aha! Moment", timestamp),
           },
+          timestamp,
         );
       }
     }
   }
 
-  private withState(room: StoredRoom, state: DemoState): StoredRoom {
+  private withState(room: StoredRoom, state: DemoState, timestamp = Date.now()): StoredRoom {
     return {
       ...room,
       state: {
         ...state,
         revision: room.state.revision + 1,
-        updatedAt: Date.now(),
+        updatedAt: timestamp,
       },
     };
   }
@@ -415,6 +574,8 @@ export class ClassroomRoom extends DurableObject<CloudflareEnv> {
       state.ahaMoment.feedback = room.ahaResponses[client.clientId]?.reaction ?? null;
       state.questions = [];
       state.timeline = [];
+      state.pulseHistory = [];
+      state.activityHistory = [];
       state.ahaMoment.feedbackMessages = [];
     }
 
@@ -423,6 +584,8 @@ export class ClassroomRoom extends DurableObject<CloudflareEnv> {
         ? state.questions.filter((question) => question.id === state.selectedQuestionId)
         : [];
       state.timeline = [];
+      state.pulseHistory = [];
+      state.activityHistory = [];
       state.studentAnswers = {};
       state.studentReaction = null;
       state.ahaMoment.feedback = null;

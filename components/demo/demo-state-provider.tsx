@@ -12,7 +12,7 @@ type TransportStatus = "connecting" | "network" | "local";
 type DemoStateContextValue = {
   state: DemoState; isReady: boolean; mode: DemoMode; room: string;
   transport: TransportStatus; studentJoinUrl: string;
-  launchInteraction: () => void; sendReaction: (reaction: ReactionKey) => void;
+  startClass: () => void; sendReaction: (reaction: ReactionKey) => void;
   launchQuiz: (quizId: QuizId) => void;
   answerQuiz: (quizId: QuizId, answer: QuizOption["id"]) => void;
   revealQuizResults: () => void; showQuestion: (questionId: string) => void;
@@ -25,7 +25,11 @@ const DemoStateContext = createContext<DemoStateContextValue | null>(null);
 
 function addTimelineEvent(state: DemoState, label: string, detail: string, eventKey?: string) {
   if (eventKey && state.timeline.some((event) => event.eventKey === eventKey)) return state.timeline;
-  return [{ id: crypto.randomUUID(), label, detail, eventKey }, ...state.timeline].slice(0, 8);
+  return [{ id: crypto.randomUUID(), label, detail, timestamp: Date.now(), eventKey }, ...state.timeline].slice(0, 8);
+}
+
+function addActivityEvent(state: DemoState, type: DemoState["activityHistory"][number]["type"], label: string, quizId?: QuizId) {
+  return [{ id: crypto.randomUUID(), timestamp: Date.now(), type, label, quizId }, ...state.activityHistory].slice(0, 200);
 }
 
 function isNewer(incoming: DemoState, current: DemoState) {
@@ -198,26 +202,44 @@ export function DemoStateProvider({ children }: { children: ReactNode }) {
     }
   }, [commit]);
 
-  const launchInteraction = useCallback(() => dispatch({ type: "launch_interaction" }, (current) => ({
-    ...current, activeQuizId: null, activityMode: "interaction", displayMode: "interaction",
-    timeline: addTimelineEvent(current, "เปิด Class Pulse", "นักเรียนส่ง Reaction ได้แล้ว"),
-  })), [dispatch]);
+  const startClass = useCallback(() => dispatch({ type: "start_class" }, (current) => {
+    if (current.session.status !== "waiting") return current;
+    const timestamp = Date.now();
+    return {
+      ...current,
+      activeQuizId: null,
+      activityMode: "idle",
+      displayMode: "interaction",
+      session: { ...current.session, status: "live", startedAt: timestamp, endedAt: null, durationMs: null },
+      timeline: addTimelineEvent(current, "เริ่มคลาส", "เปิด Class Pulse ตลอดทั้ง session", "class-started"),
+      activityHistory: addActivityEvent(current, "class_started", "เริ่มคลาส"),
+    };
+  }), [dispatch]);
 
   const sendReaction = useCallback((reaction: ReactionKey) => dispatch({ type: "reaction", reaction }, (current) => {
-    if (current.session.status === "ended" || current.activityMode !== "interaction" || current.studentReaction === reaction) return current;
+    if (current.session.status !== "live" || current.studentReaction === reaction) return current;
     const reactions = { ...current.reactions };
     if (current.studentReaction) reactions[current.studentReaction] = Math.max(0, reactions[current.studentReaction] - 1);
     reactions[reaction] += 1;
-    return { ...current, reactions, studentReaction: reaction, timeline: addTimelineEvent(current, "Class Pulse อัปเดต", "ได้รับ Reaction จากนักเรียน") };
+    return {
+      ...current,
+      reactions,
+      studentReaction: reaction,
+      pulseHistory: [{ id: crypto.randomUUID(), timestamp: Date.now(), reaction }, ...current.pulseHistory].slice(0, 500),
+      metrics: { ...current.metrics, interactionCount: current.metrics.interactionCount + 1 },
+      timeline: addTimelineEvent(current, "Class Pulse อัปเดต", "ได้รับ Reaction จากนักเรียน"),
+      activityHistory: addActivityEvent(current, "pulse_changed", "Class Pulse อัปเดต"),
+    };
   }), [dispatch]);
 
   const launchQuiz = useCallback((quizId: QuizId) => dispatch({ type: "launch_quiz", quizId }, (current) => {
+    if (current.session.status !== "live") return current;
     const quiz = getQuiz(current, quizId);
-    return { ...current, activeQuizId: quizId, activityMode: "quiz", displayMode: "quiz", timeline: addTimelineEvent(current, `เปิด ${quiz?.label ?? "Quick Quiz"}`, quiz?.question ?? "") };
+    return { ...current, activeQuizId: quizId, activityMode: "quiz", displayMode: "quiz", timeline: addTimelineEvent(current, `เปิด ${quiz?.label ?? "Quick Quiz"}`, quiz?.question ?? ""), activityHistory: addActivityEvent(current, "quiz_launched", quiz?.label ?? "Quick Quiz", quizId) };
   }), [dispatch]);
 
   const answerQuiz = useCallback((quizId: QuizId, answer: QuizOption["id"]) => dispatch({ type: "answer_quiz", quizId, answer }, (current) => {
-    if (current.activityMode !== "quiz" || current.activeQuizId !== quizId) return current;
+    if (current.session.status !== "live" || current.activityMode !== "quiz" || current.activeQuizId !== quizId) return current;
     const previous = current.studentAnswers[quizId];
     if (previous === answer) return current;
     return {
@@ -230,25 +252,27 @@ export function DemoStateProvider({ children }: { children: ReactNode }) {
         return { ...quiz, responses };
       }),
       studentAnswers: { ...current.studentAnswers, [quizId]: answer },
+      metrics: { ...current.metrics, interactionCount: current.metrics.interactionCount + 1, quizResponseCount: Math.max(current.metrics.quizResponseCount, Object.keys(current.studentAnswers).length + 1) },
       timeline: addTimelineEvent(current, "มีคำตอบ Quiz ใหม่", `นักเรียนเลือกข้อ ${answer}`),
+      activityHistory: addActivityEvent(current, "quiz_answered", `มีคำตอบ ${quizId}`, quizId),
     };
   }), [dispatch]);
 
-  const revealQuizResults = useCallback(() => dispatch({ type: "reveal_results" }, (current) => current.activeQuizId ? {
-    ...current, activityMode: "results", displayMode: "results", timeline: addTimelineEvent(current, "เปิดผล Quiz บนจอ", "ทุกคนเห็นคำตอบที่ถูกแล้ว"),
+  const revealQuizResults = useCallback(() => dispatch({ type: "reveal_results" }, (current) => current.session.status === "live" && current.activeQuizId ? {
+    ...current, activityMode: "results", displayMode: "results", timeline: addTimelineEvent(current, "เปิดผล Quiz บนจอ", "ทุกคนเห็นคำตอบที่ถูกแล้ว"), activityHistory: addActivityEvent(current, "quiz_revealed", "เปิดผล Quiz", current.activeQuizId),
   } : current), [dispatch]);
 
   const showQuestion = useCallback((questionId: string) => dispatch({ type: "show_question", questionId }, (current) => ({
     ...current, selectedQuestionId: questionId, displayMode: "question", timeline: addTimelineEvent(current, "ส่งคำถามขึ้น Classroom Display", "พร้อมคุยกับทั้งห้อง"),
   })), [dispatch]);
 
-  const launchAhaMoment = useCallback(() => dispatch({ type: "launch_aha" }, (current) => current.ahaMoment.launched ? current : {
+  const launchAhaMoment = useCallback(() => dispatch({ type: "launch_aha" }, (current) => current.session.status !== "live" || current.ahaMoment.launched ? current : {
     ...current, activityMode: "aha", displayMode: "celebration", ahaMoment: { ...current.ahaMoment, launched: true },
-    timeline: addTimelineEvent(current, "ส่ง Aha! Moment ขึ้นจอ", "เปิดรับ feedback สุดท้ายจากห้อง", "aha-moment-launched"),
+    timeline: addTimelineEvent(current, "ส่ง Aha! Moment ขึ้นจอ", "เปิดรับ feedback สุดท้ายจากห้อง", "aha-moment-launched"), activityHistory: addActivityEvent(current, "aha_launched", "Aha! Moment"),
   }), [dispatch]);
 
   const sendAhaFeedback = useCallback((reaction: ReactionKey, feedback = "") => dispatch({ type: "aha_feedback", reaction, feedback }, (current) => {
-    if (current.activityMode !== "aha") return current;
+    if (current.session.status !== "live" || current.activityMode !== "aha") return current;
     const previous = current.ahaMoment.feedback;
     if (previous === reaction && current.ahaMoment.feedbackMessages[0] === feedback.trim()) return current;
     const reactions = { ...current.ahaMoment.reactions };
@@ -258,21 +282,23 @@ export function DemoStateProvider({ children }: { children: ReactNode }) {
     return {
       ...current,
       ahaMoment: { ...current.ahaMoment, completed: true, feedback: reaction, reactions, responseCount: 1, feedbackCount: messages.length, feedbackMessages: messages },
-      timeline: addTimelineEvent(current, "ได้รับ Aha! Moment feedback", "นักเรียนส่งความรู้สึกก่อนจบคลาสแล้ว", "aha-feedback-received"),
+      metrics: { ...current.metrics, interactionCount: current.metrics.interactionCount + 1 },
+      timeline: addTimelineEvent(current, "ได้รับ Aha! Moment feedback", "นักเรียนส่งความรู้สึกก่อนจบคลาสแล้ว", "aha-feedback-received"), activityHistory: addActivityEvent(current, "aha_responded", "ได้รับ Aha! Moment"),
     };
   }), [dispatch]);
 
-  const endClass = useCallback(() => dispatch({ type: "end_class" }, (current) => current.session.status === "ended" ? current : {
-    ...current, session: { ...current.session, status: "ended" }, activityMode: "ended", displayMode: "ending",
-    timeline: addTimelineEvent(current, "จบคลาสแล้ว", "บันทึกสรุปสัญญาณของห้องเรียบร้อย", "class-ended"),
+  const endClass = useCallback(() => dispatch({ type: "end_class" }, (current) => current.session.status !== "live" ? current : {
+    ...current, session: { ...current.session, status: "ended", endedAt: Date.now(), durationMs: Math.max(0, Date.now() - (current.session.startedAt ?? Date.now())) }, activityMode: "ended", displayMode: "ending",
+    timeline: addTimelineEvent(current, "จบคลาสแล้ว", "บันทึกสรุปสัญญาณของห้องเรียบร้อย", "class-ended"), activityHistory: addActivityEvent(current, "class_ended", "จบคลาส"),
   }), [dispatch]);
 
   const submitQuestion = useCallback((text: string) => {
     const cleaned = text.trim();
     if (!cleaned) return;
-    dispatch({ type: "submit_question", text: cleaned }, (current) => ({
+    dispatch({ type: "submit_question", text: cleaned }, (current) => current.session.status !== "live" ? current : ({
       ...current, questions: [{ id: crypto.randomUUID(), text: cleaned, votes: 1, isNew: true }, ...current.questions],
-      timeline: addTimelineEvent(current, "มีคำถามใหม่", cleaned),
+      metrics: { ...current.metrics, interactionCount: current.metrics.interactionCount + 1 },
+      timeline: addTimelineEvent(current, "มีคำถามใหม่", cleaned), activityHistory: addActivityEvent(current, "question_submitted", "มีคำถามใหม่"),
     }));
   }, [dispatch]);
 
@@ -282,10 +308,10 @@ export function DemoStateProvider({ children }: { children: ReactNode }) {
   })), [dispatch]);
 
   const value = useMemo<DemoStateContextValue>(() => ({
-    state, isReady, mode, room, transport, studentJoinUrl, launchInteraction, sendReaction,
+    state, isReady, mode, room, transport, studentJoinUrl, startClass, sendReaction,
     launchQuiz, answerQuiz, revealQuizResults, showQuestion, launchAhaMoment, sendAhaFeedback,
     endClass, submitQuestion, resetDemo,
-  }), [state, isReady, mode, room, transport, studentJoinUrl, launchInteraction, sendReaction, launchQuiz, answerQuiz, revealQuizResults, showQuestion, launchAhaMoment, sendAhaFeedback, endClass, submitQuestion, resetDemo]);
+  }), [state, isReady, mode, room, transport, studentJoinUrl, startClass, sendReaction, launchQuiz, answerQuiz, revealQuizResults, showQuestion, launchAhaMoment, sendAhaFeedback, endClass, submitQuestion, resetDemo]);
 
   return <DemoStateContext.Provider value={value}>{children}</DemoStateContext.Provider>;
 }

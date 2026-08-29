@@ -25,8 +25,8 @@ export function ClassroomDisplay() {
         </div>
         <div className="flex items-center gap-3">
           <span className="flex items-center gap-2 text-sm font-bold text-muted"><Users aria-hidden="true" size={18} /> {state.session.connectedStudents} คน</span>
-          <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-extrabold tracking-[0.12em] ${state.session.status === "ended" ? "bg-[#F1ECE9] text-muted" : "bg-[#FDE8E5] text-[#A72F27]"}`}>
-            <span className={`size-2 rounded-full ${state.session.status === "ended" ? "bg-[#8A817D]" : "live-pulse bg-[#D93E33]"}`} /> {state.session.status === "ended" ? "ENDED" : !isReady || transport === "connecting" ? "CONNECTING" : transport === "network" ? "LIVE" : "LOCAL"}
+          <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-extrabold tracking-[0.12em] ${state.session.status === "ended" || state.session.status === "waiting" ? "bg-[#F1ECE9] text-muted" : "bg-[#FDE8E5] text-[#A72F27]"}`}>
+            <span className={`size-2 rounded-full ${state.session.status === "ended" || state.session.status === "waiting" ? "bg-[#8A817D]" : "live-pulse bg-[#D93E33]"}`} /> {state.session.status === "ended" ? "ENDED" : state.session.status === "waiting" ? "WAITING" : !isReady || transport === "connecting" ? "CONNECTING" : transport === "network" ? "LIVE" : "LOCAL"}
           </span>
         </div>
       </header>

@@ -1,6 +1,6 @@
-export const DEMO_STORAGE_KEY = "aha-demo-state-v4";
-export const DEMO_CHANNEL_NAME = "aha-demo-channel-v4";
-export const DEMO_STATE_VERSION = 4;
+export const DEMO_STORAGE_KEY = "aha-demo-state-v5";
+export const DEMO_CHANNEL_NAME = "aha-demo-channel-v5";
+export const DEMO_STATE_VERSION = 5;
 export const DEFAULT_ROOM_CODE = "DEMO";
 
 export type DemoMode = "live" | "rehearsal";
@@ -42,7 +42,22 @@ export type TimelineEvent = {
   id: string;
   label: string;
   detail: string;
+  timestamp: number;
   eventKey?: string;
+};
+
+export type PulseHistoryEvent = {
+  id: string;
+  timestamp: number;
+  reaction: ReactionKey;
+};
+
+export type ActivityHistoryEvent = {
+  id: string;
+  timestamp: number;
+  type: "class_started" | "pulse_changed" | "quiz_launched" | "quiz_answered" | "quiz_revealed" | "question_submitted" | "aha_launched" | "aha_responded" | "class_ended";
+  label: string;
+  quizId?: QuizId;
 };
 
 export type DemoState = {
@@ -53,7 +68,11 @@ export type DemoState = {
     course: string;
     topic: string;
     connectedStudents: number;
-    status: "live" | "ended";
+    participantCount: number;
+    status: "waiting" | "live" | "ended";
+    startedAt: number | null;
+    endedAt: number | null;
+    durationMs: number | null;
   };
   reactions: Record<ReactionKey, number>;
   questions: DemoQuestion[];
@@ -74,6 +93,13 @@ export type DemoState = {
     feedbackMessages: string[];
   };
   timeline: TimelineEvent[];
+  pulseHistory: PulseHistoryEvent[];
+  activityHistory: ActivityHistoryEvent[];
+  metrics: {
+    interactionCount: number;
+    quizResponseCount: number;
+    averageQuizResponseTimeMs: number | null;
+  };
 };
 
 export const reactionMeta: Array<{
@@ -128,7 +154,11 @@ function createBaseState(): DemoState {
       course: "Aha! Live Classroom",
       topic: "Demo Session",
       connectedStudents: 0,
-      status: "live",
+      participantCount: 0,
+      status: "waiting",
+      startedAt: null,
+      endedAt: null,
+      durationMs: null,
     },
     reactions: { understand: 0, confused: 0, slow: 0, aha: 0 },
     questions: [],
@@ -149,6 +179,13 @@ function createBaseState(): DemoState {
       feedbackMessages: [],
     },
     timeline: [],
+    pulseHistory: [],
+    activityHistory: [],
+    metrics: {
+      interactionCount: 0,
+      quizResponseCount: 0,
+      averageQuizResponseTimeMs: null,
+    },
   };
 }
 
@@ -163,7 +200,11 @@ export function createRehearsalDemoState(): DemoState {
       course: "Aha! Live Classroom",
       topic: "Demo Session",
       connectedStudents: 21,
+      participantCount: 21,
       status: "live",
+      startedAt: 0,
+      endedAt: null,
+      durationMs: null,
     },
     reactions: { understand: 10, confused: 4, slow: 2, aha: 4 },
     questions: [
@@ -177,8 +218,8 @@ export function createRehearsalDemoState(): DemoState {
       "quiz-2": { A: 3, B: 11, C: 4, D: 1 },
     }),
     timeline: [
-      { id: "seed-1", label: "โหลดข้อมูล Rehearsal แล้ว", detail: "สำหรับซ้อม Demo เท่านั้น" },
-      { id: "seed-2", label: "นักเรียนจำลอง 21 คน", detail: "Live Pitch Mode จะเริ่มจาก 0" },
+      { id: "seed-1", label: "โหลดข้อมูล Rehearsal แล้ว", detail: "สำหรับซ้อม Demo เท่านั้น", timestamp: 0 },
+      { id: "seed-2", label: "นักเรียนจำลอง 21 คน", detail: "Live Pitch Mode จะเริ่มจาก 0", timestamp: 1 },
     ],
   };
 }
@@ -198,8 +239,12 @@ export function isDemoState(value: unknown): value is DemoState {
     Array.isArray(candidate.questions) &&
     Array.isArray(candidate.quizzes) &&
     Array.isArray(candidate.timeline) &&
+    Array.isArray(candidate.pulseHistory) &&
+    Array.isArray(candidate.activityHistory) &&
     (candidate.studentReaction === null || reactionMeta.some((reaction) => reaction.key === candidate.studentReaction)) &&
-    typeof candidate.ahaMoment?.responseCount === "number"
+    typeof candidate.ahaMoment?.responseCount === "number" &&
+    typeof candidate.session?.participantCount === "number" &&
+    typeof candidate.metrics?.interactionCount === "number"
   );
 }
 

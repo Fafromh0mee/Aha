@@ -7,6 +7,7 @@ import {
   BookCheck,
   CheckCircle2,
   CircleHelp,
+  Clock3,
   LogOut,
   MonitorUp,
   PartyPopper,
@@ -26,7 +27,7 @@ export function TeacherConsole() {
     mode,
     room,
     transport,
-    launchInteraction,
+    startClass,
     launchQuiz,
     revealQuizResults,
     showQuestion,
@@ -44,7 +45,7 @@ export function TeacherConsole() {
   );
   const topSignal = totalReactions
     ? `${strongestReaction.emoji} “${strongestReaction.label}” เป็นสัญญาณที่ห้องส่งมากที่สุด (${state.reactions[strongestReaction.key]} คน)`
-    : "ยังไม่มีสัญญาณจากห้อง กด Launch Student Interaction เพื่อเริ่ม Class Pulse";
+    : "ยังไม่มีสัญญาณจากห้อง Class Pulse จะทำงานตลอดเวลาหลังเริ่มคลาส";
   const pacingSignal = state.reactions.slow || state.reactions.confused
     ? `มี ${state.reactions.slow + state.reactions.confused} คนที่ส่งสัญญาณว่างงหรือตามไม่ทัน`
     : "จังหวะการเรียนยังไม่มีสัญญาณติดขัดจากนักเรียน";
@@ -76,7 +77,7 @@ export function TeacherConsole() {
             </button>
             <div className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-extrabold tracking-[0.14em] ${state.session.status === "ended" ? "border-border bg-[#F1ECE9] text-muted" : "border-[#F3B1AA] bg-[#FDE8E5] text-[#A72F27]"}`}>
               <span className={`size-2 rounded-full ${state.session.status === "ended" ? "bg-[#8A817D]" : "live-pulse bg-[#D93E33]"}`} />
-              {state.session.status === "ended" ? "ENDED" : !isReady || transport === "connecting" ? "CONNECTING" : transport === "network" ? "LIVE" : "LOCAL"}
+              {state.session.status === "ended" ? "ENDED" : state.session.status === "waiting" ? "READY" : !isReady || transport === "connecting" ? "CONNECTING" : transport === "network" ? "LIVE" : "LOCAL"}
             </div>
             {state.session.status === "live" && (
               <button type="button" onClick={requestEndClass} aria-label="End Class" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[#CFC3BE] bg-white px-4 text-sm font-bold text-[#6F403B] hover:border-[#9F6B64] hover:bg-[#F8F1EF]">
@@ -95,7 +96,7 @@ export function TeacherConsole() {
           <div>
             <p className="text-xs font-extrabold tracking-[0.14em] text-[#B5352C] uppercase">{state.session.course}</p>
             <h1 className="mt-2 text-3xl font-black tracking-[-0.035em] sm:text-4xl">{state.session.topic}</h1>
-            <p className="mt-2 text-sm text-muted">Room {room} · {mode === "rehearsal" ? "Rehearsal data" : "Live Pitch Mode"}</p>
+            <p className="mt-2 text-sm text-muted">Room {room} · {mode === "rehearsal" ? "Rehearsal data" : state.session.status === "waiting" ? "พร้อมเริ่ม Live Pitch" : "Live Pitch Mode"}</p>
           </div>
           <div className="flex items-center gap-3 rounded-2xl bg-[#E6F7EF] px-5 py-4">
             <Users aria-hidden="true" size={22} />
@@ -106,6 +107,17 @@ export function TeacherConsole() {
           </div>
         </section>
 
+        {state.session.status === "waiting" && (
+          <section className="mt-5 flex flex-col justify-between gap-5 rounded-[20px] border border-[#F3B1AA] bg-[#FDE8E5] p-5 sm:flex-row sm:items-center sm:p-7" aria-labelledby="start-class-heading">
+            <div>
+              <p className="text-xs font-extrabold tracking-[0.14em] text-[#A72F27] uppercase">Ready to begin</p>
+              <h2 id="start-class-heading" className="mt-2 text-2xl font-black">เริ่มคลาสเมื่อทุกคนพร้อม</h2>
+              <p className="mt-2 text-sm leading-6 text-muted">เมื่อเริ่มแล้ว Class Pulse จะเปิดตลอด session และเริ่มบันทึก timeline ของห้อง</p>
+            </div>
+            <button type="button" onClick={startClass} className="inline-flex min-h-12 shrink-0 items-center justify-center gap-2 rounded-xl bg-[#F25A4B] px-5 text-sm font-extrabold hover:bg-[#E94F45]"><Play aria-hidden="true" size={17} /> Start Class</button>
+          </section>
+        )}
+
         <section className="mt-5 rounded-[20px] border border-border bg-white p-5 sm:p-7" aria-labelledby="teacher-controls">
           <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
             <div>
@@ -114,12 +126,11 @@ export function TeacherConsole() {
             </div>
             <p className="text-xs font-semibold text-muted">Student และ Display จะอัปเดตทันที</p>
           </div>
-          <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-            <ControlButton disabled={state.ahaMoment.launched} active={state.activityMode === "interaction"} onClick={launchInteraction} icon={Radio} label="Launch Student Interaction" />
-            <ControlButton disabled={state.ahaMoment.launched} active={state.activeQuizId === "quiz-1" && state.activityMode === "quiz"} onClick={() => launchQuiz("quiz-1")} icon={Play} label="Launch Quiz 1" />
-            <ControlButton disabled={state.ahaMoment.launched} active={state.activeQuizId === "quiz-2" && state.activityMode === "quiz"} onClick={() => launchQuiz("quiz-2")} icon={Play} label="Launch Quiz 2" />
-            <ControlButton disabled={!activeQuiz || state.ahaMoment.launched} active={state.activityMode === "results"} onClick={revealQuizResults} icon={MonitorUp} label="Reveal Results" />
-            <ControlButton disabled={state.ahaMoment.launched} active={state.activityMode === "aha"} onClick={launchAhaMoment} icon={PartyPopper} label={state.ahaMoment.completed ? "Aha! Moment Complete" : state.ahaMoment.launched ? "Collecting Aha! Feedback" : "Aha! Moment"} />
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <ControlButton disabled={state.session.status !== "live" || state.ahaMoment.launched} active={state.activeQuizId === "quiz-1" && state.activityMode === "quiz"} onClick={() => launchQuiz("quiz-1")} icon={Play} label="Launch Quiz 1" />
+            <ControlButton disabled={state.session.status !== "live" || state.ahaMoment.launched} active={state.activeQuizId === "quiz-2" && state.activityMode === "quiz"} onClick={() => launchQuiz("quiz-2")} icon={Play} label="Launch Quiz 2" />
+            <ControlButton disabled={state.session.status !== "live" || !activeQuiz || state.ahaMoment.launched} active={state.activityMode === "results"} onClick={revealQuizResults} icon={MonitorUp} label="Reveal Results" />
+            <ControlButton disabled={state.session.status !== "live" || state.ahaMoment.launched} active={state.activityMode === "aha"} onClick={launchAhaMoment} icon={PartyPopper} label={state.ahaMoment.completed ? "Aha! Moment Complete" : state.ahaMoment.launched ? "Collecting Aha! Feedback" : "Aha! Moment"} />
           </div>
         </section>
 
@@ -230,8 +241,7 @@ export function TeacherConsole() {
 }
 
 function TeacherClassSummary({ state }: { state: DemoState }) {
-  const totalReactions = Object.values(state.reactions).reduce((total, value) => total + value, 0);
-  const quizResponses = state.quizzes.reduce((total, quiz) => total + getResponseTotal(quiz), 0);
+  const duration = formatDuration(state.session.durationMs ?? 0);
   return (
     <div className="mx-auto max-w-[1200px] px-5 py-8 sm:px-8 sm:py-12">
       <section className="rounded-[22px] border border-border bg-white p-6 sm:p-9">
@@ -239,15 +249,15 @@ function TeacherClassSummary({ state }: { state: DemoState }) {
           <div>
             <div className="inline-flex items-center gap-2 rounded-full bg-[#E6F7EF] px-3 py-1.5 text-xs font-extrabold text-[#2E7652]"><BookCheck aria-hidden="true" size={16} /> CLASS COMPLETE</div>
             <h1 className="mt-5 text-3xl font-black tracking-[-0.035em] sm:text-5xl">สรุปคลาส {state.session.topic}</h1>
-            <p className="mt-3 text-base text-muted">{state.session.course} · บันทึกสัญญาณของห้องเรียบร้อยแล้ว</p>
+            <p className="mt-3 text-base text-muted">{state.session.course} · ระยะเวลาคลาส {duration}</p>
           </div>
           <Link href="/demo" className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-border px-5 text-sm font-bold hover:bg-[#FAF8F7]">กลับ Demo Home</Link>
         </div>
         <div className="mt-9 grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <SummaryMetric value={String(state.session.connectedStudents)} label="นักเรียน" surface="bg-[#E6F4FF]" />
-          <SummaryMetric value={String(totalReactions)} label="Class Pulse" surface="bg-[#FDEAF2]" />
-          <SummaryMetric value={String(quizResponses)} label="Quiz answers" surface="bg-[#FFF4C2]" />
-          <SummaryMetric value={String(state.questions.length)} label="คำถาม" surface="bg-[#E6F7EF]" />
+          <SummaryMetric value={String(state.session.participantCount)} label="ผู้เข้าร่วม" surface="bg-[#E6F4FF]" />
+          <SummaryMetric value={String(state.metrics.interactionCount)} label="Interactions" surface="bg-[#FDEAF2]" />
+          <SummaryMetric value={String(state.metrics.quizResponseCount)} label="Quiz responses" surface="bg-[#FFF4C2]" />
+          <SummaryMetric value={state.metrics.averageQuizResponseTimeMs === null ? "—" : formatDuration(state.metrics.averageQuizResponseTimeMs)} label="ตอบ Quiz เฉลี่ย" surface="bg-[#E6F7EF]" />
         </div>
       </section>
       <div className="mt-5 grid gap-5 lg:grid-cols-2">
@@ -265,7 +275,65 @@ function TeacherClassSummary({ state }: { state: DemoState }) {
           <p className="mt-5 rounded-2xl bg-[#FDE8E5] p-5 font-bold leading-7">“{state.questions.length ? `มีคำถามจากห้อง ${state.questions.length} ข้อสำหรับนำไปทบทวน` : "ห้องเรียนจบลงโดยไม่มีคำถามที่ค้างอยู่"}”</p>
         </section>
       </div>
+      <ClassInteractionTimeline state={state} />
     </div>
+  );
+}
+
+function formatDuration(durationMs: number) {
+  const totalSeconds = Math.max(0, Math.round(durationMs / 1000));
+  return `${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, "0")}`;
+}
+
+function ClassInteractionTimeline({ state }: { state: DemoState }) {
+  const duration = Math.max(state.session.durationMs ?? 0, 1);
+  const bucketCount = 6;
+  const buckets = Array.from({ length: bucketCount }, () => ({ understand: 0, confused: 0, slow: 0, aha: 0 }));
+  for (const event of state.pulseHistory) {
+    const offset = Math.max(0, event.timestamp - (state.session.startedAt ?? event.timestamp));
+    const index = Math.min(bucketCount - 1, Math.floor((offset / duration) * bucketCount));
+    buckets[index][event.reaction] += 1;
+  }
+  const max = Math.max(1, ...buckets.flatMap((bucket) => Object.values(bucket)));
+  const strongest = (reaction: (typeof reactionMeta)[number]["key"]) => {
+    const value = Math.max(...buckets.map((bucket) => bucket[reaction]));
+    if (value === 0) return null;
+    return { value, index: buckets.findIndex((bucket) => bucket[reaction] === value) };
+  };
+  const keyMoments = [
+    { key: "confused" as const, label: "ช่วงที่งงมากที่สุด" },
+    { key: "slow" as const, label: "ช่วงที่ตามไม่ทันมากที่สุด" },
+    { key: "aha" as const, label: "ช่วง Aha! มากที่สุด" },
+  ].map(({ key, label }) => ({ label, moment: strongest(key), reaction: reactionMeta.find((item) => item.key === key)! })).filter((item) => item.moment);
+  const markers = state.activityHistory.filter((event) => event.type === "quiz_launched" || event.type === "aha_launched");
+
+  return (
+    <section className="mt-5 rounded-[22px] border border-border bg-white p-6 sm:p-8" aria-labelledby="interaction-timeline-title">
+      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
+        <div><p className="text-xs font-extrabold tracking-[0.14em] text-muted uppercase">Recorded session data</p><h2 id="interaction-timeline-title" className="mt-2 text-2xl font-black">Class Interaction Timeline</h2><p className="mt-2 text-sm text-muted">ตลอด {formatDuration(state.session.durationMs ?? 0)} · นับการเปลี่ยนสัญญาณแบบไม่ระบุตัวตน</p></div>
+        <span className="inline-flex items-center gap-2 text-sm font-bold text-muted"><Clock3 aria-hidden="true" size={16} /> {state.pulseHistory.length} Pulse events</span>
+      </div>
+      <div className="relative mt-8 overflow-x-auto pb-2">
+        <div className="relative min-w-[620px]">
+          <div className="absolute top-0 right-0 left-28 h-6 border-b border-dashed border-border">
+            {markers.map((event) => {
+              const left = Math.min(100, Math.max(0, ((event.timestamp - (state.session.startedAt ?? event.timestamp)) / duration) * 100));
+              return <span key={event.id} className="absolute top-0 -translate-x-1/2 text-[10px] font-extrabold text-[#A72F27]" style={{ left: `${left}%` }}>◆ {event.label}</span>;
+            })}
+          </div>
+          <div className="pt-10 space-y-4">
+            {reactionMeta.map((reaction) => (
+              <div key={reaction.key} className="grid grid-cols-[96px_1fr] items-center gap-3">
+                <span className="text-sm font-bold">{reaction.emoji} {reaction.label}</span>
+                <div className="grid grid-cols-6 gap-2">{buckets.map((bucket, index) => <div key={`${reaction.key}-${index}`} className="relative h-9 overflow-hidden rounded-lg bg-[#FAF8F7]" title={`${formatDuration((duration / bucketCount) * index)} · ${bucket[reaction.key]} events`}><span className="absolute inset-x-0 bottom-0 rounded-lg" style={{ height: `${Math.max(bucket[reaction.key] ? 14 : 0, (bucket[reaction.key] / max) * 100)}%`, background: reaction.surface, borderTop: bucket[reaction.key] ? "2px solid #201A18" : undefined }} /><span className="relative flex h-full items-center justify-center text-xs font-black">{bucket[reaction.key] || ""}</span></div>)}</div>
+              </div>
+            ))}
+          </div>
+          <div className="ml-[108px] mt-3 grid grid-cols-6 gap-2 text-center text-[10px] font-bold text-muted">{buckets.map((_, index) => <span key={index}>{formatDuration((duration / bucketCount) * index)}</span>)}</div>
+        </div>
+      </div>
+      <div className="mt-7 grid gap-3 md:grid-cols-3">{keyMoments.length ? keyMoments.map(({ label, moment, reaction }) => <div key={label} className="rounded-xl border border-border bg-[#FAF8F7] p-4 text-sm"><p className="font-bold">{label}</p><p className="mt-1 text-muted">{reaction.emoji} {moment?.value} events · ช่วง {formatDuration((duration / bucketCount) * (moment?.index ?? 0))}</p></div>) : <p className="text-sm font-semibold text-muted">ยังไม่มี Pulse event เพียงพอสำหรับสรุปช่วงเวลา</p>}</div>
+    </section>
   );
 }
 
