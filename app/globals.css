@@ -2,25 +2,106 @@
 
 :root {
   --background: #ffffff;
-  --foreground: #171717;
+  --foreground: #201a18;
+  --coral: #f25a4b;
+  --coral-active: #e94f45;
+  --muted: #6f6561;
+  --border: #e8e1de;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-coral: var(--coral);
+  --color-coral-active: var(--coral-active);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --font-sans: var(--font-noto-sans-thai);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 body {
+  margin: 0;
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-noto-sans-thai), Arial, Helvetica, sans-serif;
+  text-rendering: optimizeLegibility;
+}
+
+a,
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+:focus-visible {
+  outline: 3px solid var(--foreground);
+  outline-offset: 3px;
+}
+
+::selection {
+  background: #f25a4b;
+  color: #201a18;
+}
+
+.live-pulse {
+  animation: live-pulse 1.8s ease-in-out infinite;
+}
+
+.emoji-burst {
+  animation: emoji-burst 1.6s ease-in-out infinite;
+}
+
+.celebration-float {
+  animation: celebration-float 1.8s ease-in-out infinite;
+}
+
+@keyframes live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(0.82);
+  }
+}
+
+@keyframes emoji-burst {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-2deg);
+  }
+  50% {
+    transform: translateY(-6px) rotate(3deg);
+  }
+}
+
+@keyframes celebration-float {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-5deg);
+  }
+  50% {
+    transform: translateY(-12px) rotate(6deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .live-pulse,
+  .emoji-burst,
+  .celebration-float {
+    animation: none;
+  }
 }
